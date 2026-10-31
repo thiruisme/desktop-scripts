@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions DisableDelayedExpansion
 
 where magick >nul 2>nul
 if errorlevel 1 (
@@ -15,38 +15,55 @@ if "%~1"=="" (
     exit /b 1
 )
 
-set "OUTDIR=%~dp1resized"
-if not exist "%OUTDIR%" mkdir "%OUTDIR%"
+set "FAILED=0"
 
-for %%F in (%*) do call :process "%%~fF" "%%~nF" "%%~nxF"
+:loop
+if "%~1"=="" goto done
 
-echo.
-echo Done. Output: %OUTDIR%
-pause
-exit /b
-
-:process
-set "FILEPATH=%~1"
-set "NAME=%~2"
-set "FULLNAME=%~3"
-set "QUALITY=90"
-
-echo Processing: %FULLNAME%
-magick "%FILEPATH%" -resize "x1920>" -quality %QUALITY% "%OUTDIR%\%NAME%.jpg"
-
-:checksize
-for %%A in ("%OUTDIR%\%NAME%.jpg") do set "FSIZE=%%~zA"
-if !FSIZE! GTR 204800 (
-    set /a QUALITY-=5
-    if !QUALITY! LEQ 10 (
-        echo   [WARN] %FULLNAME% could not get under 200KB
-        goto :donefile
-    )
-    magick "%FILEPATH%" -resize "x1920>" -quality !QUALITY! "%OUTDIR%\%NAME%.jpg"
-    goto :checksize
+if exist "%~f1\*" (
+    echo [SKIP] "%~nx1" -- is a folder
+    goto next
 )
 
-:donefile
-set /a FSIZE_KB=!FSIZE! / 1024
-echo   [OK] %NAME%.jpg [!FSIZE_KB!KB, q=!QUALITY!]
-exit /b
+set "OUTDIR=%~dp1resized"
+if not exist "%OUTDIR%\" mkdir "%OUTDIR%" 2>nul
+if not exist "%OUTDIR%\" (
+    echo [FAIL] "%~nx1" -- could not create "%OUTDIR%"
+    set /a FAILED+=1
+    goto next
+)
+
+echo Processing: "%~nx1"
+REM --- jpeg:extent makes ImageMagick search for the best quality that fits in 200KB ---
+magick "%~f1" -delete 1--1 -define filename:literal=true -auto-orient -resize "x1920>" -background white -alpha remove -alpha off -quality 90 -define jpeg:extent=200KB "%OUTDIR%\%~n1.jpg"
+
+if errorlevel 1 goto optim_fail
+if not exist "%OUTDIR%\%~n1.jpg" goto optim_fail
+
+set "SIZE=0"
+for %%A in ("%OUTDIR%\%~n1.jpg") do set "SIZE=%%~zA"
+set /a "SIZE_KB=SIZE / 1024"
+if %SIZE% GTR 204800 (
+    echo   [WARN] "%~n1.jpg" could not get under 200KB [%SIZE_KB% KB]
+) else (
+    echo   [OK] "resized\%~n1.jpg" [%SIZE_KB% KB]
+)
+goto next
+
+:optim_fail
+echo   [FAIL] "%~nx1"
+set /a FAILED+=1
+
+:next
+shift
+goto loop
+
+:done
+echo.
+if %FAILED% GTR 0 (
+    echo Done with %FAILED% failure^(s^).
+    pause
+    exit /b 1
+)
+echo Done.
+exit /b 0
